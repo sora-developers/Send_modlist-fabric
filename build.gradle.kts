@@ -1,19 +1,27 @@
-plugins {
-    id("net.fabricmc.fabric-loom-remap")
+import net.fabricmc.loom.api.LoomGradleExtensionAPI
+import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
-    // `maven-publish`
-    // id("me.modmuss50.mod-publish-plugin")
+val isUnobfuscated = sc.current.parsed >= "26.1"
+
+if (isUnobfuscated) {
+    apply(plugin = "net.fabricmc.fabric-loom")
+} else {
+    apply(plugin = "net.fabricmc.fabric-loom-remap")
 }
 
 version = "${property("mod.version")}+${sc.current.version}"
 base.archivesName = property("mod.id") as String
 
 val requiredJava = when {
+    sc.current.parsed >= "26.1" -> JavaVersion.VERSION_25
     sc.current.parsed >= "1.20.5" -> JavaVersion.VERSION_21
     sc.current.parsed >= "1.18" -> JavaVersion.VERSION_17
     sc.current.parsed >= "1.17" -> JavaVersion.VERSION_16
     else -> JavaVersion.VERSION_1_8
 }
+
+val loomApi: LoomGradleExtensionAPI get() = extensions.getByType<LoomGradleExtensionAPI>()
 
 repositories {
     /**
@@ -29,66 +37,73 @@ repositories {
 }
 
 dependencies {
-    /**
-     * Fetches only the required Fabric API modules to not waste time downloading all of them for each version.
-     * @see <a href="https://github.com/FabricMC/fabric">List of Fabric API modules</a>
-     */
-    fun fapi(vararg modules: String) {
-        for (it in modules) modImplementation(fabricApi.module(it, property("deps.fabric_api") as String))
+    add("minecraft", "com.mojang:minecraft:${sc.current.version}")
+    if (!isUnobfuscated) {
+        add("mappings", loomApi.officialMojangMappings())
     }
 
-    minecraft("com.mojang:minecraft:${sc.current.version}")
-    mappings(loom.officialMojangMappings())
-    modImplementation("net.fabricmc:fabric-loader:${property("deps.fabric_loader")}")
-
-    fapi("fabric-lifecycle-events-v1", "fabric-resource-loader-v0", "fabric-content-registries-v0")
+    val fabricApiVersion = property("deps.fabric_api") as String
+    if (isUnobfuscated) {
+        // 26.1+: 非難読化のため standard implementation を使用
+        add("implementation", "net.fabricmc:fabric-loader:${property("deps.fabric_loader")}")
+        add("implementation", "net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
+    } else {
+        add("modImplementation", "net.fabricmc:fabric-loader:${property("deps.fabric_loader")}")
+        add("modImplementation", "net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
+    }
 }
 
-loom {
-    fabricModJsonPath = rootProject.file("src/main/resources/fabric.mod.json") // Useful for interface injection
-    accessWidenerPath = rootProject.file("src/main/resources/template.accesswidener")
-
-    decompilerOptions.named("vineflower") {
-        options.put("mark-corresponding-synthetics", "1") // Adds names to lambdas - useful for mixins
-    }
+configure<LoomGradleExtensionAPI> {
+    fabricModJsonPath = rootProject.file("src/main/resources/fabric.mod.json")
 
     runConfigs.all {
         ideConfigGenerated(true)
-        vmArgs("-Dmixin.debug.export=true") // Exports transformed classes for debugging
-        runDir = "../../run" // Shares the run directory between versions
+        vmArgs("-Dmixin.debug.export=true")
+        runDir = "../../run"
     }
 }
 
-java {
+configure<JavaPluginExtension> {
     withSourcesJar()
     targetCompatibility = requiredJava
     sourceCompatibility = requiredJava
 }
 
 tasks {
-    processResources {
+    named<Copy>("processResources") {
+        val fabricApiModId = if (sc.current.parsed < "1.18") "fabric" else "fabric-api"
+
         inputs.property("id", project.property("mod.id"))
         inputs.property("name", project.property("mod.name"))
         inputs.property("version", project.property("mod.version"))
         inputs.property("minecraft", project.property("mod.mc_dep"))
+        inputs.property("fabric_api_mod", fabricApiModId)
 
         val props = mapOf(
             "id" to project.property("mod.id"),
             "name" to project.property("mod.name"),
             "version" to project.property("mod.version"),
-            "minecraft" to project.property("mod.mc_dep")
+            "minecraft" to project.property("mod.mc_dep"),
+            "fabric_api_mod" to fabricApiModId
         )
 
         filesMatching("fabric.mod.json") { expand(props) }
-
-        val mixinJava = "JAVA_${requiredJava.majorVersion}"
-        filesMatching("*.mixins.json") { expand("java" to mixinJava) }
     }
 
     // Builds the version into a shared folder in `build/libs/${mod version}/`
     register<Copy>("buildAndCollect") {
         group = "build"
-        from(remapJar.map { it.archiveFile }, remapSourcesJar.map { it.archiveFile })
+        val jarFile = if (isUnobfuscated) {
+            named<AbstractArchiveTask>("jar").map { it.archiveFile }
+        } else {
+            named<AbstractArchiveTask>("remapJar").map { it.archiveFile }
+        }
+        val sourcesFile = if (isUnobfuscated) {
+            named<AbstractArchiveTask>("sourcesJar").map { it.archiveFile }
+        } else {
+            named<AbstractArchiveTask>("remapSourcesJar").map { it.archiveFile }
+        }
+        from(jarFile, sourcesFile)
         into(rootProject.layout.buildDirectory.file("libs/${project.property("mod.version")}"))
         dependsOn("build")
     }
@@ -97,8 +112,10 @@ tasks {
 /*
 // Publishes builds to Modrinth and Curseforge with changelog from the CHANGELOG.md file
 publishMods {
-    file = tasks.remapJar.map { it.archiveFile.get() }
-    additionalFiles.from(tasks.remapSourcesJar.map { it.archiveFile.get() })
+    file = if (isUnobfuscated) tasks.named<AbstractArchiveTask>("jar").map { it.archiveFile.get() }
+           else tasks.named<AbstractArchiveTask>("remapJar").map { it.archiveFile.get() }
+    additionalFiles.from(if (isUnobfuscated) tasks.named<AbstractArchiveTask>("sourcesJar").map { it.archiveFile }
+                         else tasks.named<AbstractArchiveTask>("remapSourcesJar").map { it.archiveFile })
     displayName = "${property("mod.name")} ${property("mod.version")} for ${property("mod.mc_title")}"
     version = property("mod.version") as String
     changelog = rootProject.file("CHANGELOG.md").readText()
@@ -133,8 +150,6 @@ publishing {
     repositories {
         maven("https://maven.example.com/releases") {
             name = "myMaven"
-            // To authenticate, create `myMavenUsername` and `myMavenPassword` properties in your Gradle home properties.
-            // See https://stonecutter.kikugie.dev/wiki/tips/properties#defining-properties
             credentials(PasswordCredentials::class.java)
             authentication {
                 create<BasicAuthentication>("basic")

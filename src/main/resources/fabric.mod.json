@@ -3,28 +3,23 @@
   "id": "${id}",
   "version": "${version}",
   "name": "${name}",
-  "description": "This is an example description! Tell everyone what your mod is about!",
+  "description": "クライアントのModリストをサーバーに送信するMod",
   "authors": [
-    "Me!"
+    "rakku212"
   ],
   "contact": {
-    "homepage": "https://stonecutter.kikugie.dev/",
-    "sources": "https://codeberg.org/stonecutter/template-fabric"
+    "sources": "https://github.com/rakku212/Send_modlist-fabric"
   },
-  "license": "CC0-1.0",
-  "icon": "assets/template/icon.png",
-  "environment": "*",
+  "license": "MIT",
+  "environment": "client",
   "entrypoints": {
-    "main": [
-      "com.example.TemplateMod"
+    "client": [
+      "com.rakku212.sendmodlist.SendModList"
     ]
   },
-  "mixins": [
-    "template.mixins.json"
-  ],
-  "accessWidener": "template.accesswidener",
   "depends": {
     "fabricloader": ">=0.17",
+    "${fabric_api_mod}": "*",
     "minecraft": "${minecraft}"
   }
 }
