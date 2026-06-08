@@ -7,9 +7,6 @@
   "authors": [
     "neko developer"
   ],
-  "contact": {
-    "sources": "https://github.com/rakku212/Send_modlist-fabric"
-  },
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
