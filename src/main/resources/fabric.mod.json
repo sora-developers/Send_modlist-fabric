@@ -5,7 +5,7 @@
   "name": "${name}",
   "description": "クライアントのModリストをサーバーに送信するMod",
   "authors": [
-    "neko developer"
+    "nero developer"
   ],
   "license": "MIT",
   "environment": "client",
